@@ -442,3 +442,12 @@ async def get_model_status():
         "backend_model": model_name,
         "ollama_models": ollama_models
     }
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/chat")
+async def get_chat():
+    return FileResponse("chat.html")
