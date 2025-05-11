@@ -450,4 +450,4 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/chat")
 async def get_chat():
-    return FileResponse("chat.html")
+    return FileResponse("static/chat.html")
