@@ -1,0 +1,12 @@
+langchain>=0.1.13
+langchain-community>=0.0.27
+langchain-core
+langchain-huggingface
+faiss-cpu
+sentence-transformers
+fastapi
+uvicorn
+pydantic
+docx2txt
+python-multipart
+beautifulsoup4

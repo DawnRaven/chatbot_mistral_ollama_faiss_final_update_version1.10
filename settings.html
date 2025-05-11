@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <title>Cài đặt Chatbot</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        button, input[type="radio"] {
+            padding: 6px 12px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h2>Danh sách mô hình Ollama</h2>
+    <table id="models-table">
+        <thead>
+            <tr>
+                <th>Chọn</th>
+                <th>Tên mô hình</th>
+                <th>Thông số</th>
+                <th>Trạng thái</th>
+                <th>Thao tác</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <h2>Cập nhật FAISS Index</h2>
+    <button onclick="reindex()">Cập nhật lại FAISS Index</button>
+
+    <h2>Trạng thái mô hình hiện tại</h2>
+    <div id="model-status" style="margin-top: 1rem; font-family: monospace; color: #333;"></div>
+
+    <h2>Instruction hệ thống</h2>
+    <textarea id="instruction" rows="5" style="width: 100%;"></textarea><br />
+    <button onclick="updateInstruction()">Cập nhật instruction</button>
+
+    <div style="margin-top: 20px;">
+        <h3>Nhập tên model để tải (Ollama)</h3>
+        <input type="text" id="modelNameInput" placeholder="ví dụ: mistral" style="width: 300px;" />
+        <button onclick="pullModel()">Tải model</button>
+        <p id="pullStatus"></p>
+    </div>
+
+    <div style="margin-top: 30px;">
+        <h3>Thông tin các container Docker đang chạy</h3>
+        <button onclick="loadContainers()">Làm mới</button>
+        <table border="1" id="containerTable" style="margin-top: 10px;">
+            <thead>
+                <tr><th>ID</th><th>Tên</th><th>IP</th><th>Cổng</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div style="margin-top: 30px;">
+        <h3>Đặt địa chỉ Backend API</h3>
+        <input type="text" id="backendHostInput" placeholder="ví dụ: http://192.168.1.100:8000" style="width: 400px;" />
+        <button onclick="saveBackendHost()">Lưu cấu hình</button>
+        <p id="backendStatus"></p>
+    </div>
+
+    <div style="margin-top: 30px;">
+        <h3>Thông tin cấu hình trong LocalStorage</h3>
+        <button onclick="showLocalStorage()">Hiển thị cấu hình</button>
+        <button onclick="resetLocalStorage()" style="margin-left: 10px; color: red;">Xóa toàn bộ cấu hình</button>
+        <pre id="localStorageOutput" style="background:#f9f9f9;padding:10px;border:1px solid #ccc;margin-top:10px;"></pre>
+    </div>
+
+    <div style="margin-top: 30px;">
+        <h3>Kéo model từ Ollama API (thủ công)</h3>
+        <input type="text" id="apiModelName" placeholder="ví dụ: llama3, mistral" style="width: 300px;" />
+        <button onclick="pullModelFromApi()">Tải model từ API</button>
+        <p id="apiPullStatus"></p>
+    </div>
+
+<script>
+let BACKEND_HOST = localStorage.getItem("BACKEND_HOST") || "http://localhost:8000";
+let currentModel = localStorage.getItem("chatbot_model") || "";
+
+window.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("backendHostInput").value = BACKEND_HOST;
+    fetchInstruction();
+    fetchModelStatus();
+    fetchModels();
+    loadContainers();
+});
+
+function saveBackendHost() {
+    const input = document.getElementById("backendHostInput").value;
+    if (input) {
+        localStorage.setItem("BACKEND_HOST", input);
+        BACKEND_HOST = input;
+        document.getElementById("backendStatus").innerText = "Đã lưu địa chỉ backend.";
+        loadContainers();
+    }
+}
+
+async function fetchBackend(path, options = {}) {
+    const url = BACKEND_HOST + path;
+    return await fetch(url, options);
+}
+
+async function fetchModels() {
+    const res = await fetchBackend("/models/list");
+    const models = await res.json();
+    const tableBody = document.querySelector("#models-table tbody");
+    tableBody.innerHTML = "";
+
+    models.forEach(model => {
+        const isPulled = model.details && model.details.size;
+        const modelName = model.name;
+        const status = (modelName === currentModel) ? "Đang sử dụng" : (isPulled ? "Đã tải" : "Chưa tải");
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td><input type="radio" name="currentModel" value="${modelName}" ${modelName === currentModel ? "checked" : ""} onchange="selectModel('${modelName}')"></td>
+            <td>${modelName}</td>
+            <td>${model.details?.parameter_size || "?"}</td>
+            <td>${status}</td>
+            <td><button onclick="pullModelFromList('${modelName}')">Tải mô hình</button></td>
+        `;
+        tableBody.appendChild(row);
+    });
+}
+
+async function fetchInstruction() {
+    try {
+        const res = await fetchBackend("/get-instruction");
+        const data = await res.json();
+        document.getElementById("instruction").value = data.instruction || "";
+    } catch (err) {
+        console.error("Không thể lấy instruction:", err);
+    }
+}
+
+async function updateInstruction() {
+    const value = document.getElementById("instruction").value;
+    const res = await fetchBackend("http://localhost:8000/set-instruction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction: value })
+    });
+    const data = await res.json();
+    alert(data.message || "Đã cập nhật.");
+}
+
+function selectModel(name) {
+    currentModel = name;
+    localStorage.setItem("chatbot_model", name);
+    fetchBackend("/set-model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+    }).then(res => res.json()).then(data => {
+        alert(data.message || "Đã gửi yêu cầu chọn mô hình.");
+    });
+}
+
+async function pullModel() {
+    const modelName = document.getElementById("modelNameInput").value;
+    const statusEl = document.getElementById("pullStatus");
+    if (!modelName) {
+        statusEl.innerText = "Vui lòng nhập tên model.";
+        return;
+    }
+    try {
+        console.log(modelName);
+        const response = await fetchBackend("http://localhost:8000/models/pull", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: modelName })
+        });
+        const data = await response.json();
+        statusEl.innerText = data.message || "Model đã được tải.";
+        fetchModelStatus();
+        fetchModels();
+    } catch (error) {
+        statusEl.innerText = "Lỗi khi tải model: " + error.message;
+    }
+}
+
+async function pullModelFromList(modelName) {
+    const response = await fetchBackend("http://localhost:8000/models/pull", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: modelName })
+    });
+    const data = await response.json();
+    alert(data.message || "Đã gửi yêu cầu tải mô hình.");
+    fetchModelStatus();
+    fetchModels();
+}
+
+async function pullModelFromApi() {
+    const model = document.getElementById("apiModelName").value;
+    const status = document.getElementById("apiPullStatus");
+    if (!model) {
+        status.innerText = "Vui lòng nhập tên model.";
+        return;
+    }
+    try {
+        const response = await fetch(BACKEND_HOST + "/models/pull", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: model })
+        });
+        const data = await response.json();
+        status.innerText = data.message || "Đã gửi yêu cầu tải model.";
+        fetchModelStatus();
+        fetchModels();
+    } catch (error) {
+        status.innerText = "Lỗi khi gọi API: " + error.message;
+    }
+}
+
+async function fetchModelStatus() {
+    try {
+        const res = await fetchBackend("http://localhost:8000/model/status");
+        const data = await res.json();
+        const container = document.getElementById("model-status");
+        container.innerHTML = `
+            <p><strong>✅ Backend đang dùng:</strong> ${data.backend_model}</p>
+            <p><strong>📦 Đã tải trong Ollama:</strong> ${Array.isArray(data.ollama_models) ? data.ollama_models.join(", ") : data.ollama_models}</p>
+        `;
+    } catch (err) {
+        document.getElementById("model-status").innerText = "⚠️ Không thể lấy trạng thái mô hình.";
+    }
+}
+
+async function loadContainers() {
+    const tableBody = document.getElementById("containerTable")?.querySelector("tbody");
+    if (!tableBody) return;
+    tableBody.innerHTML = "";
+
+    try {
+        const response = await fetchBackend("/docker/containers");
+        const data = await response.json();
+        if (Array.isArray(data.containers)) {
+            data.containers.forEach(c => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${c.id}</td>
+                    <td>${c.name}</td>
+                    <td>${c.ip}</td>
+                    <td>${c.ports}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        } else {
+            const row = document.createElement("tr");
+            row.innerHTML = `<td colspan="4">Không có container nào được trả về.</td>`;
+            tableBody.appendChild(row);
+        }
+    } catch (error) {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td colspan="4">Lỗi khi lấy thông tin: ${error.message}</td>`;
+        tableBody.appendChild(row);
+    }
+}
+
+function showLocalStorage() {
+    let output = "";
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        const value = localStorage.getItem(key);
+        output += `${key}: ${value}
+`;
+    }
+    document.getElementById("localStorageOutput").innerText = output || "Không có cấu hình nào.";
+}
+
+function resetLocalStorage() {
+    if (confirm("Bạn có chắc chắn muốn xóa toàn bộ cấu hình?")) {
+        localStorage.clear();
+        showLocalStorage();
+        alert("Đã xóa toàn bộ cấu hình.");
+    }
+}
+</script>
+
+<h3>Chọn mô hình Embedding</h3>
+<label for="embedding">Chọn Embedding:</label>
+<select id="embedding">
+  <option value="distiluse-base-multilingual-cased-v2">distiluse-base-multilingual</option>
+  <option value="intfloat/multilingual-e5-base">multilingual-e5-base</option>
+  <option value="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2">MiniLM-Multilingual</option>
+</select>
+<button onclick="updateEmbedding()">Lưu Embedding</button>
+
+<script>
+function updateEmbedding() {
+  const embedding = document.getElementById('embedding').value;
+  fetch('http://localhost:8000/config/embedding', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ embedding })
+  }).then(res => res.ok ? alert("Cập nhật thành công") : alert("Lỗi cập nhật embedding"));
+}
+</script>
+
+
+<h3>Embedding hiện tại</h3>
+<p id="current-embedding">Đang tải...</p>
+
+<script>
+function fetchCurrentEmbedding() {
+  fetch('http://localhost:8000/config/embedding/current')
+    .then(response => response.json())
+    .then(data => {
+      document.getElementById('current-embedding').innerText = "Đang sử dụng Embedding: " + (data.embedding || "Không xác định");
+    })
+    .catch(error => {
+      document.getElementById('current-embedding').innerText = "Không thể lấy trạng thái embedding.";
+    });
+}
+fetchCurrentEmbedding();
+</script>
+
+
+<h3>Chế độ RAG Only</h3>
+<label>
+  <input type="checkbox" id="rag-only-toggle" onchange="toggleRagMode(this.checked)">
+  Bật chế độ chỉ trả lời theo tài liệu (RAG Only)
+</label>
+
+<script>
+function toggleRagMode(enabled) {
+  fetch('http://localhost:8000/config/rag', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enable: enabled })
+  }).then(response => {
+    if (response.ok) {
+      alert(enabled ? "Đã bật RAG Only" : "Đã tắt RAG Only");
+    } else {
+      alert("Lỗi cập nhật chế độ RAG");
+    }
+  });
+}
+</script>
+
+
+<script>
+function fetchCurrentRagMode() {
+  fetch('http://localhost:8000/config/rag/current')
+    .then(response => response.json())
+    .then(data => {
+      document.getElementById('rag-only-toggle').checked = data.rag_only_mode;
+    })
+    .catch(error => {
+      console.error('Lỗi lấy trạng thái RAG Only:', error);
+    });
+}
+// Gọi ngay khi mở trang
+fetchCurrentRagMode();
+</script>
+
+</body>
+</html>

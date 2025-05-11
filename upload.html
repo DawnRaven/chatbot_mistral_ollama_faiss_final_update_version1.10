@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Upload Tài Liệu & Train lại FAISS</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 50px;
+            text-align: center;
+        }
+        
+        h1 {
+            color: #4CAF50;
+        }
+        
+        input[type="file"],
+        button {
+            margin: 20px;
+            padding: 10px 15px;
+            font-size: 16px;
+        }
+        
+        #message {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Upload file .docx</h1>
+    <input type="file" id="docFile" accept=".docx">
+    <br>
+    <button onclick="uploadFile()">Tải lên</button>
+    <button onclick="retrainFaiss()">Train lại FAISS index</button>
+    <div id="message"></div>
+
+    <script>
+        function showMessage(msg) {
+            document.getElementById("message").textContent = msg;
+        }
+
+        async function uploadFile() {
+            const fileInput = document.getElementById("docFile");
+            if (!fileInput.files.length) {
+                showMessage("Vui lòng chọn file .docx");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            try {
+                const response = await fetchBackend("/upload", {
+                    method: "POST",
+                    body: formData
+                });
+                const result = await response.json();
+                showMessage(result.message || "Tải lên thành công!");
+            } catch (error) {
+                showMessage("Lỗi kết nối server!");
+            }
+        }
+
+        async function retrainFaiss() {
+            try {
+                const response = await fetchBackend("/retrain", {
+                    method: "POST"
+                });
+                const result = await response.json();
+                showMessage(result.message || "Đã train lại FAISS!");
+            } catch (error) {
+                showMessage("Lỗi khi train lại FAISS!");
+            }
+        }
+    </script>
+
+<script>
+  let BACKEND_HOST = localStorage.getItem("BACKEND_HOST") || "http://localhost:8000";
+
+  async function fetchBackend(path, options = {}) {
+    return await fetch(BACKEND_HOST + path, options);
+  }
+</script>
+
+</body>
+
+</html>
