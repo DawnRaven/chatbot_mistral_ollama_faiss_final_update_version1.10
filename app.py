@@ -451,3 +451,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/chat")
 async def get_chat():
     return FileResponse("static/chat.html")
+
+# Serve settings.html
+@app.get("/settings")
+async def get_settings():
+    return FileResponse("static/settings.html")
